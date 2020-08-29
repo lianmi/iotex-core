@@ -24,7 +24,6 @@ import (
 	"github.com/iotexproject/iotex-core/action/protocol"
 	"github.com/iotexproject/iotex-core/blockchain/block"
 	"github.com/iotexproject/iotex-core/config"
-	"github.com/iotexproject/iotex-core/db"
 	"github.com/iotexproject/iotex-core/pkg/lifecycle"
 	"github.com/iotexproject/iotex-core/pkg/log"
 	"github.com/iotexproject/iotex-core/pkg/prometheustimer"
@@ -92,37 +91,21 @@ type (
 )
 
 // NewBlockDAO instantiates a block DAO
-func NewBlockDAO(kvStore db.KVStore, indexers []BlockIndexer, compressBlock bool, cfg config.DB) BlockDAO {
-	blkStore, err := NewFileDAO(kvStore, compressBlock, cfg)
+func NewBlockDAO(indexers []BlockIndexer, compressBlock bool, cfg config.DB) BlockDAO {
+	blkStore, err := NewFileDAO(compressBlock, cfg)
 	if err != nil {
 		return nil
 	}
+	return createBlockDAO(blkStore, indexers, cfg)
+}
 
-	blockDAO := &blockDAO{
-		blockStore: blkStore,
-		indexers:   indexers,
-	}
-
-	blockDAO.lifecycle.Add(blkStore)
-	for _, indexer := range indexers {
-		blockDAO.lifecycle.Add(indexer)
-	}
-	if cfg.MaxCacheSize > 0 {
-		blockDAO.headerCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
-		blockDAO.bodyCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
-		blockDAO.footerCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
-	}
-	timerFactory, err := prometheustimer.New(
-		"iotex_block_dao_perf",
-		"Performance of block DAO",
-		[]string{"type"},
-		[]string{"default"},
-	)
+// NewBlockDAOInMemForTest creates a in-memory block DAO for testing
+func NewBlockDAOInMemForTest(indexers []BlockIndexer, cfg config.DB) BlockDAO {
+	blkStore, err := NewFileDAOInMemForTest(cfg)
 	if err != nil {
 		return nil
 	}
-	blockDAO.timerFactory = timerFactory
-	return blockDAO
+	return createBlockDAO(blkStore, indexers, cfg)
 }
 
 // Start starts block DAO and initiates the top height if it doesn't exist
@@ -442,6 +425,38 @@ func (dao *blockDAO) DeleteBlockToTarget(targetHeight uint64) error {
 		atomic.StoreUint64(&dao.tipHeight, tipHeight)
 	}
 	return nil
+}
+
+func createBlockDAO(blkStore FileDAO, indexers []BlockIndexer, cfg config.DB) BlockDAO {
+	if blkStore == nil {
+		return nil
+	}
+
+	blockDAO := &blockDAO{
+		blockStore: blkStore,
+		indexers:   indexers,
+	}
+
+	blockDAO.lifecycle.Add(blkStore)
+	for _, indexer := range indexers {
+		blockDAO.lifecycle.Add(indexer)
+	}
+	if cfg.MaxCacheSize > 0 {
+		blockDAO.headerCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
+		blockDAO.bodyCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
+		blockDAO.footerCache = cache.NewThreadSafeLruCache(cfg.MaxCacheSize)
+	}
+	timerFactory, err := prometheustimer.New(
+		"iotex_block_dao_perf",
+		"Performance of block DAO",
+		[]string{"type"},
+		[]string{"default"},
+	)
+	if err != nil {
+		return nil
+	}
+	blockDAO.timerFactory = timerFactory
+	return blockDAO
 }
 
 func lruCacheGet(c *cache.ThreadSafeLruCache, key interface{}) (interface{}, bool) {

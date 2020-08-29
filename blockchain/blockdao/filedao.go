@@ -51,16 +51,21 @@ type (
 )
 
 // NewFileDAO creates an instance of FileDAO
-func NewFileDAO(kvStore db.KVStore, compressBlock bool, cfg config.DB) (FileDAO, error) {
-	legacyFd, err := newFileDAOLegacy(kvStore, compressBlock, cfg)
+func NewFileDAO(compressBlock bool, cfg config.DB) (FileDAO, error) {
+	legacyFd, err := newFileDAOLegacy(db.NewBoltDB(cfg), compressBlock, cfg)
 	if err != nil {
 		return nil, err
 	}
+	return createFileDAO(legacyFd)
+}
 
-	// TODO: create map of new files
-	return &fileDAO{
-		legacyFd: legacyFd,
-	}, nil
+// NewFileDAOInMemForTest creates an in-memory FileDAO for testing
+func NewFileDAOInMemForTest(cfg config.DB) (FileDAO, error) {
+	legacyFd, err := newFileDAOLegacy(db.NewMemKVStore(), false, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return createFileDAO(legacyFd)
 }
 
 func (fd *fileDAO) Start(ctx context.Context) error {
@@ -116,4 +121,10 @@ func (fd *fileDAO) PutBlock(ctx context.Context, blk *block.Block) error {
 
 func (fd *fileDAO) DeleteTipBlock() error {
 	return fd.legacyFd.DeleteTipBlock()
+}
+
+func createFileDAO(legacy FileDAO) (FileDAO, error) {
+	return &fileDAO{
+		legacyFd: legacy,
+	}, nil
 }
